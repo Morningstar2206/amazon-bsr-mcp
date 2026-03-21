@@ -1,0 +1,26 @@
+# Environment variables (contains API keys!)
+.env
+.env.local
+.env.production
+
+# Node modules
+node_modules/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Redis dump
+dump.rdb
+
+# Temporary files
+*.tmp
+*.swp
+
+# IDE
+.vscode/
+.idea/
