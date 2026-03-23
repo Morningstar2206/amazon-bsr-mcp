@@ -9,9 +9,9 @@ let model;
 try {
     scraper = new ScraperClient();
     model = new SalesModel();
-    console.error('✅ Initialized: Scraper and Sales Model');
+    console.error('[OK] Initialized: Scraper and Sales Model');
 } catch (error) {
-    console.error('❌ Initialization failed:', error.message);
+    console.error('[ERROR] Initialization failed:', error.message);
     process.exit(1);
 }
 
@@ -21,7 +21,6 @@ try {
 async function handleQuery(params) {
     const { asin, category } = params;
     
-    // Input validation
     if (!asin) {
         return {
             error: true,
@@ -30,7 +29,6 @@ async function handleQuery(params) {
         };
     }
     
-    // Basic ASIN validation
     const asinPattern = /^[A-Z0-9]{10}$/;
     if (!asinPattern.test(asin.toUpperCase())) {
         return {
@@ -41,15 +39,11 @@ async function handleQuery(params) {
     }
     
     try {
-        console.error(`📊 Processing ASIN: ${asin}`);
+        console.error(`[INFO] Processing ASIN: ${asin}`);
         
-        // Scrape current BSR
         const productData = await scraper.scrapeProduct(asin);
-        
-        // Estimate sales
         const estimate = model.estimate(productData.bsr, category || productData.category);
         
-        // Combine results
         const result = {
             asin: productData.asin,
             title: productData.title,
@@ -62,12 +56,12 @@ async function handleQuery(params) {
             timestamp: new Date().toISOString()
         };
         
-        console.error(`✅ Success: ${asin} → ${result.estimatedMonthlySales.toLocaleString()} sales/month`);
+        console.error(`[OK] Success: ${asin} -> ${result.estimatedMonthlySales.toLocaleString()} sales/month`);
         
         return result;
         
     } catch (error) {
-        console.error(`❌ Error for ${asin}:`, error.message);
+        console.error(`[ERROR] Error for ${asin}:`, error.message);
         return {
             error: true,
             asin,
@@ -78,100 +72,164 @@ async function handleQuery(params) {
 }
 
 // ============================================
-// MCP Server Setup - CORRECTED VERSION
+// MCP Server Setup - HTTP Mode for Railway
 // ============================================
 
 const { Server } = require('@modelcontextprotocol/sdk/server/index.js');
-const { StdioServerTransport } = require('@modelcontextprotocol/sdk/server/stdio.js');
 const {
     CallToolRequestSchema,
     ListToolsRequestSchema,
 } = require('@modelcontextprotocol/sdk/types.js');
 
-// Create server instance
-const server = new Server(
-    {
-        name: 'amazon-bsr-tool',
-        version: '1.0.0',
-    },
-    {
-        capabilities: {
-            tools: {},
-        },
-    }
-);
+// Check if running on Railway (has PORT env) or local
+const isRailway = process.env.PORT !== undefined;
 
-// Handle tool listing
-server.setRequestHandler(ListToolsRequestSchema, async () => {
-    return {
+if (isRailway) {
+    // HTTP Mode for Railway
+    const express = require('express');
+    const app = express();
+    const port = process.env.PORT || 3000;
+    
+    app.use(express.json());
+    
+    // Health check endpoint
+    app.get('/health', (req, res) => {
+        res.json({ 
+            status: 'ok', 
+            tool: 'amazon-bsr-tool',
+            version: '1.0.0',
+            dataPoints: model.getStats().dataPoints
+        });
+    });
+    
+    // MCP endpoint
+    app.post('/mcp', async (req, res) => {
+        const { method, params, id } = req.body;
+        
+        try {
+            if (method === 'tools/list') {
+                const tools = {
+                    jsonrpc: '2.0',
+                    id,
+                    result: {
+                        tools: [
+                            {
+                                name: 'estimate_amazon_sales',
+                                description: 'Estimate monthly sales for an Amazon product using BSR',
+                                inputSchema: {
+                                    type: 'object',
+                                    properties: {
+                                        asin: { type: 'string', description: 'Amazon Standard Identification Number' },
+                                        category: { type: 'string', description: 'Optional category name' }
+                                    },
+                                    required: ['asin']
+                                }
+                            },
+                            {
+                                name: 'model_stats',
+                                description: 'Get calibration statistics',
+                                inputSchema: { type: 'object', properties: {} }
+                            }
+                        ]
+                    }
+                };
+                res.json(tools);
+                
+            } else if (method === 'tools/call') {
+                const { name, arguments: args } = params;
+                
+                if (name === 'estimate_amazon_sales') {
+                    const result = await handleQuery(args);
+                    res.json({
+                        jsonrpc: '2.0',
+                        id,
+                        result: {
+                            content: [{ type: 'text', text: JSON.stringify(result, null, 2) }]
+                        }
+                    });
+                } else if (name === 'model_stats') {
+                    const stats = model.getStats();
+                    res.json({
+                        jsonrpc: '2.0',
+                        id,
+                        result: {
+                            content: [{ type: 'text', text: JSON.stringify(stats, null, 2) }]
+                        }
+                    });
+                } else {
+                    throw new Error(`Unknown tool: ${name}`);
+                }
+            } else {
+                res.json({
+                    jsonrpc: '2.0',
+                    id,
+                    error: { code: -32601, message: 'Method not found' }
+                });
+            }
+        } catch (error) {
+            res.json({
+                jsonrpc: '2.0',
+                id,
+                error: { code: -32000, message: error.message }
+            });
+        }
+    });
+    
+    app.listen(port, () => {
+        console.error(`[RUNNING] Amazon BSR Tool MCP Server running on port ${port}`);
+        console.error(`[MODEL] ${model.getStats().formula}`);
+        console.error(`[DATA] Data points: ${model.getStats().dataPoints}`);
+        console.error(`[HEALTH] Health check: http://localhost:${port}/health`);
+    });
+    
+} else {
+    // STDIO Mode for local development
+    const { StdioServerTransport } = require('@modelcontextprotocol/sdk/server/stdio.js');
+    
+    const server = new Server(
+        { name: 'amazon-bsr-tool', version: '1.0.0' },
+        { capabilities: { tools: {} } }
+    );
+    
+    server.setRequestHandler(ListToolsRequestSchema, async () => ({
         tools: [
             {
                 name: 'estimate_amazon_sales',
-                description: 'Estimate monthly sales for an Amazon product using BSR (Best Sellers Rank). Returns estimated sales volume and confidence level.',
+                description: 'Estimate monthly sales for an Amazon product using BSR',
                 inputSchema: {
                     type: 'object',
                     properties: {
-                        asin: {
-                            type: 'string',
-                            description: 'Amazon Standard Identification Number (10-character product ID, e.g., "059035342X")'
-                        },
-                        category: {
-                            type: 'string',
-                            description: 'Optional category name for better accuracy (e.g., "Books", "Electronics")'
-                        }
+                        asin: { type: 'string', description: 'Amazon Standard Identification Number' },
+                        category: { type: 'string', description: 'Optional category name' }
                     },
                     required: ['asin']
                 }
             },
             {
                 name: 'model_stats',
-                description: 'Get calibration statistics about the sales estimation model',
-                inputSchema: {
-                    type: 'object',
-                    properties: {}
-                }
+                description: 'Get calibration statistics',
+                inputSchema: { type: 'object', properties: {} }
             }
         ]
-    };
-});
-
-// Handle tool calls
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    const { name, arguments: args } = request.params;
+    }));
     
-    switch (name) {
-        case 'estimate_amazon_sales': {
+    server.setRequestHandler(CallToolRequestSchema, async (request) => {
+        const { name, arguments: args } = request.params;
+        
+        if (name === 'estimate_amazon_sales') {
             const result = await handleQuery(args);
-            return {
-                content: [{
-                    type: 'text',
-                    text: JSON.stringify(result, null, 2)
-                }]
-            };
-        }
-            
-        case 'model_stats': {
+            return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+        } else if (name === 'model_stats') {
             const stats = model.getStats();
-            return {
-                content: [{
-                    type: 'text',
-                    text: JSON.stringify(stats, null, 2)
-                }]
-            };
+            return { content: [{ type: 'text', text: JSON.stringify(stats, null, 2) }] };
         }
-            
-        default:
-            throw new Error(`Unknown tool: ${name}`);
-    }
-});
-
-// Start server
-async function start() {
+        throw new Error(`Unknown tool: ${name}`);
+    });
+    
     const transport = new StdioServerTransport();
-    await server.connect(transport);
-    console.error('🚀 Amazon BSR Tool MCP Server running');
-    console.error(`📊 Model: ${model.getStats().formula}`);
-    console.error(`📈 Data points: ${model.getStats().dataPoints}`);
+    server.connect(transport);
+    
+    console.error('[RUNNING] Amazon BSR Tool MCP Server running (stdio mode)');
+    console.error(`[MODEL] ${model.getStats().formula}`);
+    console.error(`[DATA] Data points: ${model.getStats().dataPoints}`);
 }
-
-start().catch(console.error);

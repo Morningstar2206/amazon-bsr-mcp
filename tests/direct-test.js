@@ -5,7 +5,7 @@ const ScraperClient = require('../src/scraper-client');
 const SalesModel = require('../src/sales-model');
 
 async function directTest() {
-    console.log('🧪 DIRECT TEST - Amazon BSR Tool\n');
+    console.log(' DIRECT TEST - Amazon BSR Tool\n');
     console.log('=' .repeat(60));
     
     const scraper = new ScraperClient();
@@ -29,17 +29,17 @@ async function directTest() {
         try {
             // Fetch BSR
             const productData = await scraper.scrapeProduct(asin);
-            console.log(`   ✅ BSR: ${productData.bsr.toLocaleString()}`);
-            console.log(`   📝 Title: ${productData.title.substring(0, 60)}...`);
+            console.log(`    BSR: ${productData.bsr.toLocaleString()}`);
+            console.log(`    Title: ${productData.title.substring(0, 60)}...`);
             
             // Estimate sales
             const estimate = model.estimate(productData.bsr, productData.category);
-            console.log(`   💰 Estimated Monthly Sales: ${estimate.estimatedMonthlySales.toLocaleString()}`);
-            console.log(`   🎯 Confidence: ${estimate.confidence}`);
-            console.log(`   📐 Formula: ${estimate.formula}`);
+            console.log(`    Estimated Monthly Sales: ${estimate.estimatedMonthlySales.toLocaleString()}`);
+            console.log(`    Confidence: ${estimate.confidence}`);
+            console.log(`    Formula: ${estimate.formula}`);
             
         } catch (error) {
-            console.log(`   ❌ Error: ${error.message}`);
+            console.log(`    Error: ${error.message}`);
         }
         
         console.log('');
@@ -49,11 +49,11 @@ async function directTest() {
     }
     
     console.log('=' .repeat(60));
-    console.log('✅ Test complete');
+    console.log(' Test complete');
     
     // Show model stats
     const stats = model.getStats();
-    console.log(`\n📊 Model Stats:`);
+    console.log(`\n Model Stats:`);
     console.log(`   Data points: ${stats.dataPoints}`);
     console.log(`   Formula: ${stats.formula}`);
 }
