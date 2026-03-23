@@ -72,7 +72,7 @@ async function handleQuery(params) {
 }
 
 // ============================================
-// MCP Server Setup - Full Protocol Support
+// MCP Server Setup - Correct JSON-RPC
 // ============================================
 
 const express = require('express');
@@ -106,6 +106,7 @@ app.post('/mcp', async (req, res) => {
     const { method, params, id } = req.body;
     
     console.error(`[MCP] Received method: ${method}`);
+    console.error(`[MCP] Full body:`, JSON.stringify(req.body));
     
     // Handle initialize (handshake method)
     if (method === 'initialize') {
@@ -122,8 +123,8 @@ app.post('/mcp', async (req, res) => {
         return res.json({ jsonrpc: '2.0', id, result });
     }
     
-    // Handle initialized notification (no response expected)
-    if (method === 'initialized') {
+    // Handle notifications (no response expected)
+    if (method === 'notifications/initialized') {
         return res.status(204).end();
     }
     
