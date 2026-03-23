@@ -72,7 +72,7 @@ async function handleQuery(params) {
 }
 
 // ============================================
-// MCP Server Setup - Correct JSON-RPC
+// MCP Server Setup - Correct Protocol Version
 // ============================================
 
 const express = require('express');
@@ -106,12 +106,11 @@ app.post('/mcp', async (req, res) => {
     const { method, params, id } = req.body;
     
     console.error(`[MCP] Received method: ${method}`);
-    console.error(`[MCP] Full body:`, JSON.stringify(req.body));
     
-    // Handle initialize (handshake method)
+    // Handle initialize with correct protocol version
     if (method === 'initialize') {
         const result = {
-            protocolVersion: '0.1.0',
+            protocolVersion: '1.0.0',
             serverInfo: {
                 name: 'amazon-bsr-tool',
                 version: '1.0.0'
