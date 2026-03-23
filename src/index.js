@@ -107,20 +107,20 @@ app.post('/mcp', async (req, res) => {
     
     console.error(`[MCP] Received method: ${method}`);
     
-    // Handle initialize with correct protocol version
-    if (method === 'initialize') {
-        const result = {
-            protocolVersion: '1.0.0',
-            serverInfo: {
-                name: 'amazon-bsr-tool',
-                version: '1.0.0'
-            },
-            capabilities: {
-                tools: {}
-            }
-        };
-        return res.json({ jsonrpc: '2.0', id, result });
-    }
+    // Find this section in your initialize handler
+if (method === 'initialize') {
+    const result = {
+        protocolVersion: '2024-11-05',
+        serverInfo: {
+            name: 'amazon-bsr-tool',
+            version: '1.0.0'
+        },
+        capabilities: {
+            tools: {}
+        }
+    };
+    return res.json({ jsonrpc: '2.0', id, result });
+}
     
     // Handle notifications (no response expected)
     if (method === 'notifications/initialized') {
