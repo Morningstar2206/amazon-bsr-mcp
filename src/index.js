@@ -72,164 +72,146 @@ async function handleQuery(params) {
 }
 
 // ============================================
-// MCP Server Setup - HTTP Mode for Railway
+// MCP Server Setup - Full Protocol Support
 // ============================================
 
-const { Server } = require('@modelcontextprotocol/sdk/server/index.js');
-const {
-    CallToolRequestSchema,
-    ListToolsRequestSchema,
-} = require('@modelcontextprotocol/sdk/types.js');
+const express = require('express');
+const app = express();
+const port = process.env.PORT || 3000;
 
-// Check if running on Railway (has PORT env) or local
-const isRailway = process.env.PORT !== undefined;
+app.use(express.json());
 
-if (isRailway) {
-    // HTTP Mode for Railway
-    const express = require('express');
-    const app = express();
-    const port = process.env.PORT || 3000;
-    
-    app.use(express.json());
-    
-    // Health check endpoint
-    app.get('/health', (req, res) => {
-        res.json({ 
-            status: 'ok', 
-            tool: 'amazon-bsr-tool',
-            version: '1.0.0',
-            dataPoints: model.getStats().dataPoints
-        });
+// Health check endpoint
+app.get('/health', (req, res) => {
+    res.json({ 
+        status: 'ok', 
+        tool: 'amazon-bsr-tool',
+        version: '1.0.0',
+        dataPoints: model.getStats().dataPoints
     });
+});
+
+// Root endpoint
+app.get('/', (req, res) => {
+    res.json({
+        tool: 'amazon-bsr-tool',
+        version: '1.0.0',
+        endpoints: ['/health', '/mcp'],
+        instructions: 'POST JSON-RPC requests to /mcp'
+    });
+});
+
+// MCP endpoint - handles all JSON-RPC methods
+app.post('/mcp', async (req, res) => {
+    const { method, params, id } = req.body;
     
-    // MCP endpoint
-    app.post('/mcp', async (req, res) => {
-        const { method, params, id } = req.body;
+    console.error(`[MCP] Received method: ${method}`);
+    
+    // Handle initialize (handshake method)
+    if (method === 'initialize') {
+        const result = {
+            protocolVersion: '0.1.0',
+            serverInfo: {
+                name: 'amazon-bsr-tool',
+                version: '1.0.0'
+            },
+            capabilities: {
+                tools: {}
+            }
+        };
+        return res.json({ jsonrpc: '2.0', id, result });
+    }
+    
+    // Handle initialized notification (no response expected)
+    if (method === 'initialized') {
+        return res.status(204).end();
+    }
+    
+    // Handle tools/list
+    if (method === 'tools/list') {
+        const result = {
+            tools: [
+                {
+                    name: 'estimate_amazon_sales',
+                    description: 'Estimate monthly sales for an Amazon product using BSR (Best Sellers Rank). Returns estimated sales volume and confidence level.',
+                    inputSchema: {
+                        type: 'object',
+                        properties: {
+                            asin: {
+                                type: 'string',
+                                description: 'Amazon Standard Identification Number (10-character product ID, e.g., "059035342X")'
+                            },
+                            category: {
+                                type: 'string',
+                                description: 'Optional category name for better accuracy (e.g., "Books", "Electronics")'
+                            }
+                        },
+                        required: ['asin']
+                    }
+                },
+                {
+                    name: 'model_stats',
+                    description: 'Get calibration statistics about the sales estimation model',
+                    inputSchema: {
+                        type: 'object',
+                        properties: {}
+                    }
+                }
+            ]
+        };
+        return res.json({ jsonrpc: '2.0', id, result });
+    }
+    
+    // Handle tools/call
+    if (method === 'tools/call') {
+        const { name, arguments: args } = params;
         
-        try {
-            if (method === 'tools/list') {
-                const tools = {
+        if (name === 'estimate_amazon_sales') {
+            try {
+                const result = await handleQuery(args);
+                return res.json({
                     jsonrpc: '2.0',
                     id,
                     result: {
-                        tools: [
-                            {
-                                name: 'estimate_amazon_sales',
-                                description: 'Estimate monthly sales for an Amazon product using BSR',
-                                inputSchema: {
-                                    type: 'object',
-                                    properties: {
-                                        asin: { type: 'string', description: 'Amazon Standard Identification Number' },
-                                        category: { type: 'string', description: 'Optional category name' }
-                                    },
-                                    required: ['asin']
-                                }
-                            },
-                            {
-                                name: 'model_stats',
-                                description: 'Get calibration statistics',
-                                inputSchema: { type: 'object', properties: {} }
-                            }
-                        ]
+                        content: [{ type: 'text', text: JSON.stringify(result, null, 2) }]
                     }
-                };
-                res.json(tools);
-                
-            } else if (method === 'tools/call') {
-                const { name, arguments: args } = params;
-                
-                if (name === 'estimate_amazon_sales') {
-                    const result = await handleQuery(args);
-                    res.json({
-                        jsonrpc: '2.0',
-                        id,
-                        result: {
-                            content: [{ type: 'text', text: JSON.stringify(result, null, 2) }]
-                        }
-                    });
-                } else if (name === 'model_stats') {
-                    const stats = model.getStats();
-                    res.json({
-                        jsonrpc: '2.0',
-                        id,
-                        result: {
-                            content: [{ type: 'text', text: JSON.stringify(stats, null, 2) }]
-                        }
-                    });
-                } else {
-                    throw new Error(`Unknown tool: ${name}`);
-                }
-            } else {
-                res.json({
+                });
+            } catch (error) {
+                return res.json({
                     jsonrpc: '2.0',
                     id,
-                    error: { code: -32601, message: 'Method not found' }
+                    error: { code: -32000, message: error.message }
                 });
             }
-        } catch (error) {
-            res.json({
-                jsonrpc: '2.0',
-                id,
-                error: { code: -32000, message: error.message }
-            });
-        }
-    });
-    
-    app.listen(port, () => {
-        console.error(`[RUNNING] Amazon BSR Tool MCP Server running on port ${port}`);
-        console.error(`[MODEL] ${model.getStats().formula}`);
-        console.error(`[DATA] Data points: ${model.getStats().dataPoints}`);
-        console.error(`[HEALTH] Health check: http://localhost:${port}/health`);
-    });
-    
-} else {
-    // STDIO Mode for local development
-    const { StdioServerTransport } = require('@modelcontextprotocol/sdk/server/stdio.js');
-    
-    const server = new Server(
-        { name: 'amazon-bsr-tool', version: '1.0.0' },
-        { capabilities: { tools: {} } }
-    );
-    
-    server.setRequestHandler(ListToolsRequestSchema, async () => ({
-        tools: [
-            {
-                name: 'estimate_amazon_sales',
-                description: 'Estimate monthly sales for an Amazon product using BSR',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        asin: { type: 'string', description: 'Amazon Standard Identification Number' },
-                        category: { type: 'string', description: 'Optional category name' }
-                    },
-                    required: ['asin']
-                }
-            },
-            {
-                name: 'model_stats',
-                description: 'Get calibration statistics',
-                inputSchema: { type: 'object', properties: {} }
-            }
-        ]
-    }));
-    
-    server.setRequestHandler(CallToolRequestSchema, async (request) => {
-        const { name, arguments: args } = request.params;
-        
-        if (name === 'estimate_amazon_sales') {
-            const result = await handleQuery(args);
-            return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
         } else if (name === 'model_stats') {
             const stats = model.getStats();
-            return { content: [{ type: 'text', text: JSON.stringify(stats, null, 2) }] };
+            return res.json({
+                jsonrpc: '2.0',
+                id,
+                result: {
+                    content: [{ type: 'text', text: JSON.stringify(stats, null, 2) }]
+                }
+            });
+        } else {
+            return res.json({
+                jsonrpc: '2.0',
+                id,
+                error: { code: -32601, message: `Tool not found: ${name}` }
+            });
         }
-        throw new Error(`Unknown tool: ${name}`);
+    }
+    
+    // Handle any other method
+    return res.json({
+        jsonrpc: '2.0',
+        id,
+        error: { code: -32601, message: `Method not found: ${method}` }
     });
-    
-    const transport = new StdioServerTransport();
-    server.connect(transport);
-    
-    console.error('[RUNNING] Amazon BSR Tool MCP Server running (stdio mode)');
+});
+
+app.listen(port, () => {
+    console.error(`[RUNNING] Amazon BSR Tool MCP Server running on port ${port}`);
     console.error(`[MODEL] ${model.getStats().formula}`);
     console.error(`[DATA] Data points: ${model.getStats().dataPoints}`);
-}
+    console.error(`[HEALTH] Health check: http://localhost:${port}/health`);
+});
